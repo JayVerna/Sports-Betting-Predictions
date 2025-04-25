@@ -1,0 +1,61 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2706
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 ```\
+import \{ NextRequest, NextResponse \} from 'next/server';\
+\
+// API key for The Odds API\
+const API_KEY = "f6783af85083477932de3a1a191cd406";\
+const BASE_URL = "https://api.the-odds-api.com/v4";\
+const SPORTS = ["baseball_mlb", "basketball_nba", "icehockey_nhl"];\
+const MARKETS = ["h2h", "spreads", "totals"];\
+const REGIONS = ["us"];\
+\
+export async function GET(request: NextRequest)  \{\
+  try \{\
+    const sport = request.nextUrl.searchParams.get('sport') || 'all';\
+    \
+    if (sport !== 'all' && !SPORTS.includes(sport)) \{\
+      return NextResponse.json(\
+        \{ error: `Invalid sport. Must be one of: $\{SPORTS.join(', ')\} or 'all'` \},\
+        \{ status: 400 \}\
+      );\
+    \}\
+    \
+    const sportsToFetch = sport === 'all' ? SPORTS : [sport];\
+    const allOddsData: any = \{\};\
+    \
+    for (const sportKey of sportsToFetch) \{\
+      const url = `$\{BASE_URL\}/sports/$\{sportKey\}/odds`;\
+      const params = new URLSearchParams(\{\
+        apiKey: API_KEY,\
+        regions: REGIONS.join(','),\
+        markets: MARKETS.join(','),\
+        oddsFormat: 'american'\
+      \});\
+      \
+      const response = await fetch(`$\{url\}?$\{params.toString()\}`);\
+      \
+      if (!response.ok) \{\
+        console.error(`Error fetching odds for $\{sportKey\}: $\{response.status\} $\{response.statusText\}`);\
+        continue;\
+      \}\
+      \
+      const data = await response.json();\
+      allOddsData[sportKey] = data;\
+    \}\
+    \
+    return NextResponse.json(allOddsData);\
+  \} catch (error) \{\
+    console.error('Error fetching odds data:', error);\
+    return NextResponse.json(\
+      \{ error: 'Failed to fetch odds data' \},\
+      \{ status: 500 \}\
+    );\
+  \}\
+\}\
+```}

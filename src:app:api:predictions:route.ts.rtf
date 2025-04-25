@@ -1,0 +1,293 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2706
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 ```\
+import \{ NextRequest, NextResponse \} from 'next/server';\
+\
+export async function GET(request: NextRequest) \{\
+  try \{\
+    // Fetch odds data\
+    const oddsResponse = await fetch(`$\{request.nextUrl.origin\}/api/odds`);\
+    if (!oddsResponse.ok) \{\
+      throw new Error(`Failed to fetch odds data: $\{oddsResponse.status\} $\{oddsResponse.statusText\}`);\
+    \}\
+    const oddsData = await oddsResponse.json();\
+    \
+    // Fetch betting percentages\
+    const bettingResponse = await fetch(`$\{request.nextUrl.origin\}/api/betting-percentages`);\
+    if (!bettingResponse.ok) \{\
+      throw new Error(`Failed to fetch betting percentages: $\{bettingResponse.status\} $\{bettingResponse.statusText\}`);\
+    \}\
+    const bettingData = await bettingResponse.json();\
+    \
+    // Process data and generate predictions\
+    const predictions = generatePredictions(oddsData, bettingData);\
+    \
+    // Return top 3 predictions\
+    return NextResponse.json(predictions.slice(0, 3));\
+  \} catch (error) \{\
+    console.error('Error generating predictions:', error);\
+    return NextResponse.json(\
+      \{ error: 'Failed to generate predictions' \},\
+      \{ status: 500 \}\
+    );\
+  \}\
+\}\
+\
+function generatePredictions(oddsData: any, bettingData: any) \{\
+  const allPredictions: any[] = [];\
+  \
+  // Process each sport\
+  for (const sport of Object.keys(oddsData)) \{\
+    const sportKey = sport.split('_')[1]; // Convert 'baseball_mlb' to 'mlb'\
+    const sportBettingData = bettingData[sportKey] || [];\
+    \
+    // Create a map of betting data for easy lookup\
+    const bettingMap = new Map();\
+    sportBettingData.forEach((bet: any) => \{\
+      const key = `$\{bet.away_team\}|$\{bet.home_team\}`;\
+      bettingMap.set(key, bet);\
+    \});\
+    \
+    // Process each game\
+    oddsData[sport].forEach((game: any) => \{\
+      try \{\
+        const prediction = predictGame(game, bettingMap);\
+        if (prediction) \{\
+          allPredictions.push(prediction);\
+        \}\
+      \} catch (e) \{\
+        console.error(`Error predicting game:`, e);\
+      \}\
+    \});\
+  \}\
+  \
+  // Sort predictions by confidence\
+  allPredictions.sort((a, b) => b.overall_confidence - a.overall_confidence);\
+  \
+  return allPredictions;\
+\}\
+\
+function predictGame(game: any, bettingMap: Map<string, any>) \{\
+  const homeTeam = game.home_team;\
+  const awayTeam = game.away_team;\
+  const bettingKey = `$\{awayTeam\}|$\{homeTeam\}`;\
+  const bettingData = bettingMap.get(bettingKey);\
+  \
+  // Basic prediction object\
+  const prediction: any = \{\
+    game_id: game.id,\
+    sport: game.sport_key,\
+    home_team: homeTeam,\
+    away_team: awayTeam,\
+    commence_time: game.commence_time,\
+  \};\
+  \
+  // Extract odds data\
+  let homeOdds = 0;\
+  let awayOdds = 0;\
+  let homeSpread = 0;\
+  let awaySpread = 0;\
+  let homeSpreadOdds = 0;\
+  let awaySpreadOdds = 0;\
+  let totalOver = 0;\
+  let totalOverOdds = 0;\
+  let totalUnder = 0;\
+  let totalUnderOdds = 0;\
+  \
+  // Get average odds across bookmakers\
+  if (game.bookmakers && game.bookmakers.length > 0) \{\
+    let h2hHomeOdds: number[] = [];\
+    let h2hAwayOdds: number[] = [];\
+    let spreadHome: number[] = [];\
+    let spreadAway: number[] = [];\
+    let spreadHomeOdds: number[] = [];\
+    let spreadAwayOdds: number[] = [];\
+    let totalOverPoints: number[] = [];\
+    let totalOverOddsArr: number[] = [];\
+    let totalUnderPoints: number[] = [];\
+    let totalUnderOddsArr: number[] = [];\
+    \
+    for (const bookmaker of game.bookmakers) \{\
+      for (const market of bookmaker.markets || []) \{\
+        if (market.key === 'h2h' && market.outcomes && market.outcomes.length >= 2) \{\
+          for (const outcome of market.outcomes) \{\
+            if (outcome.name === homeTeam) \{\
+              h2hHomeOdds.push(outcome.price);\
+            \} else if (outcome.name === awayTeam) \{\
+              h2hAwayOdds.push(outcome.price);\
+            \}\
+          \}\
+        \} else if (market.key === 'spreads' && market.outcomes && market.outcomes.length >= 2) \{\
+          for (const outcome of market.outcomes) \{\
+            if (outcome.name === homeTeam) \{\
+              spreadHome.push(outcome.point);\
+              spreadHomeOdds.push(outcome.price);\
+            \} else if (outcome.name === awayTeam) \{\
+              spreadAway.push(outcome.point);\
+              spreadAwayOdds.push(outcome.price);\
+            \}\
+          \}\
+        \} else if (market.key === 'totals' && market.outcomes && market.outcomes.length >= 2) \{\
+          for (const outcome of market.outcomes) \{\
+            if (outcome.name === 'Over') \{\
+              totalOverPoints.push(outcome.point);\
+              totalOverOddsArr.push(outcome.price);\
+            \} else if (outcome.name === 'Under') \{\
+              totalUnderPoints.push(outcome.point);\
+              totalUnderOddsArr.push(outcome.price);\
+            \}\
+          \}\
+        \}\
+      \}\
+    \}\
+    \
+    // Calculate averages\
+    homeOdds = average(h2hHomeOdds);\
+    awayOdds = average(h2hAwayOdds);\
+    homeSpread = average(spreadHome);\
+    awaySpread = average(spreadAway);\
+    homeSpreadOdds = average(spreadHomeOdds);\
+    awaySpreadOdds = average(spreadAwayOdds);\
+    totalOver = average(totalOverPoints);\
+    totalOverOdds = average(totalOverOddsArr);\
+    totalUnder = average(totalUnderPoints);\
+    totalUnderOdds = average(totalUnderOddsArr);\
+  \}\
+  \
+  // Add betting percentages if available\
+  if (bettingData) \{\
+    prediction.home_bet_percentage = parseInt(bettingData.home_bet_percentage);\
+    prediction.away_bet_percentage = parseInt(bettingData.away_bet_percentage);\
+    prediction.home_money_percentage = parseInt(bettingData.home_money_percentage);\
+    prediction.away_money_percentage = parseInt(bettingData.away_money_percentage);\
+    \
+    // Calculate bet vs money discrepancy (indicator of sharp money)\
+    prediction.home_bet_money_diff = prediction.home_money_percentage - prediction.home_bet_percentage;\
+    prediction.away_bet_money_diff = prediction.away_money_percentage - prediction.away_bet_percentage;\
+  \} else \{\
+    // Default values if betting data not available\
+    prediction.home_bet_percentage = 50;\
+    prediction.away_bet_percentage = 50;\
+    prediction.home_money_percentage = 50;\
+    prediction.away_money_percentage = 50;\
+    prediction.home_bet_money_diff = 0;\
+    prediction.away_bet_money_diff = 0;\
+  \}\
+  \
+  // Convert American odds to implied probability\
+  let homeImpliedProb = 0;\
+  let awayImpliedProb = 0;\
+  \
+  if (homeOdds > 0) \{\
+    homeImpliedProb = 100 / (homeOdds + 100);\
+  \} else if (homeOdds < 0) \{\
+    homeImpliedProb = Math.abs(homeOdds) / (Math.abs(homeOdds) + 100);\
+  \}\
+  \
+  if (awayOdds > 0) \{\
+    awayImpliedProb = 100 / (awayOdds + 100);\
+  \} else if (awayOdds < 0) \{\
+    awayImpliedProb = Math.abs(awayOdds) / (Math.abs(awayOdds) + 100);\
+  \}\
+  \
+  // Adjust for vig\
+  const totalProb = homeImpliedProb + awayImpliedProb;\
+  if (totalProb > 0) \{\
+    homeImpliedProb = homeImpliedProb / totalProb;\
+    awayImpliedProb = awayImpliedProb / totalProb;\
+  \}\
+  \
+  // Calculate value based on public money percentages\
+  const homeMoney = prediction.home_money_percentage / 100;\
+  const awayMoney = prediction.away_money_percentage / 100;\
+  \
+  // Calculate value ratings\
+  let homeValue = 0;\
+  let awayValue = 0;\
+  \
+  // Value based on odds vs public money\
+  if (homeMoney > 0) \{\
+    homeValue += (homeImpliedProb - homeMoney) * 100;\
+  \}\
+  \
+  if (awayMoney > 0) \{\
+    awayValue += (awayImpliedProb - awayMoney) * 100;\
+  \}\
+  \
+  // Adjust value based on sharp money indicator\
+  homeValue += prediction.home_bet_money_diff * 0.5;\
+  awayValue += prediction.away_bet_money_diff * 0.5;\
+  \
+  // Moneyline prediction\
+  if (homeValue > awayValue && homeValue > 5) \{\
+    prediction.ml_pick = homeTeam;\
+    prediction.ml_odds = homeOdds;\
+    prediction.ml_confidence = Math.min(Math.abs(homeValue) / 10, 5);  // Scale 0-5\
+  \} else if (awayValue > homeValue && awayValue > 5) \{\
+    prediction.ml_pick = awayTeam;\
+    prediction.ml_odds = awayOdds;\
+    prediction.ml_confidence = Math.min(Math.abs(awayValue) / 10, 5);  // Scale 0-5\
+  \} else \{\
+    prediction.ml_pick = 'No Pick';\
+    prediction.ml_odds = 0;\
+    prediction.ml_confidence = 0;\
+  \}\
+  \
+  // Spread prediction\
+  const spreadHomeValue = homeValue + (prediction.home_bet_money_diff * 0.7);\
+  const spreadAwayValue = awayValue + (prediction.away_bet_money_diff * 0.7);\
+  \
+  if (spreadHomeValue > spreadAwayValue && spreadHomeValue > 5) \{\
+    prediction.spread_pick = `$\{homeTeam\} $\{homeSpread\}`;\
+    prediction.spread_odds = homeSpreadOdds;\
+    prediction.spread_confidence = Math.min(Math.abs(spreadHomeValue) / 10, 5);  // Scale 0-5\
+  \} else if (spreadAwayValue > spreadHomeValue && spreadAwayValue > 5) \{\
+    prediction.spread_pick = `$\{awayTeam\} $\{awaySpread\}`;\
+    prediction.spread_odds = awaySpreadOdds;\
+    prediction.spread_confidence = Math.min(Math.abs(spreadAwayValue) / 10, 5);  // Scale 0-5\
+  \} else \{\
+    prediction.spread_pick = 'No Pick';\
+    prediction.spread_odds = 0;\
+    prediction.spread_confidence = 0;\
+  \}\
+  \
+  // Total prediction - simplified for this example\
+  const totalValue = (Math.random() * 10) - 5;  // Random value between -5 and 5\
+  \
+  if (totalValue > 2) \{\
+    prediction.total_pick = `Over $\{totalOver\}`;\
+    prediction.total_odds = totalOverOdds;\
+    prediction.total_confidence = Math.min(Math.abs(totalValue) / 2, 5);  // Scale 0-5\
+  \} else if (totalValue < -2) \{\
+    prediction.total_pick = `Under $\{totalUnder\}`;\
+    prediction.total_odds = totalUnderOdds;\
+    prediction.total_confidence = Math.min(Math.abs(totalValue) / 2, 5);  // Scale 0-5\
+  \} else \{\
+    prediction.total_pick = 'No Pick';\
+    prediction.total_odds = 0;\
+    prediction.total_confidence = 0;\
+  \}\
+  \
+  // Overall confidence rating (average of non-zero confidences)\
+  const confidences = [\
+    prediction.ml_confidence || 0,\
+    prediction.spread_confidence || 0,\
+    prediction.total_confidence || 0\
+  ].filter(c => c > 0);\
+  \
+  prediction.overall_confidence = confidences.length > 0 ? \
+    confidences.reduce((sum, val) => sum + val, 0) / confidences.length : 0;\
+  \
+  return prediction;\
+\}\
+\
+function average(arr: number[]): number \{\
+  if (!arr || arr.length === 0) return 0;\
+  return arr.reduce((sum, val) => sum + val, 0) / arr.length;\
+\}\
+```}
